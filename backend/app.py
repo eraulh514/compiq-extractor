@@ -14,83 +14,80 @@ import anthropic
 app = Flask(__name__)
 CORS(app)
 
-SYSTEM_PROMPT = """You are a CRE (commercial real estate) data extraction specialist. You will receive a comp sheet PDF — it may be image-based or text-based, from JLL, CBRE, Cushman & Wakefield, or any broker format.
+SYSTEM_PROMPT = """You are a CRE (commercial real estate) data extraction specialist. You will receive a comp sheet PDF.
 
-YOUR JOB: Extract every deal/property row and return a JSON array. Each element = one deal.
+Extract every deal/property row and return ONLY a valid JSON array. Each element = one deal object.
 
-CRITICAL SPLITTING RULES:
-1. "Property Name" and "Property Address" are often stacked in the same column. Split into SEPARATE "Property Name" and "Property Address" fields.
-2. "Market" and "Submarket" are often stacked (submarket in parentheses). Split into SEPARATE fields, strip parentheses.
-3. "Sale Price" and "Price PSF" are often stacked (PSF in parentheses). Split into SEPARATE fields, strip parentheses.
-4. Split any other combined columns the same way.
-5. Strip ALL parentheses from all values.
+SPLITTING RULES:
+1. Property Name and Property Address are often stacked in one column — split into separate "Property Name" and "Property Address" fields.
+2. Market and Submarket are often stacked (submarket in parentheses) — split into separate fields, remove parentheses.
+3. Sale Price and Price PSF are often stacked (PSF in parentheses) — split into separate fields, remove parentheses.
 
 RULES:
-- Read the document visually — it may be a scanned image PDF
-- Use clear human-readable key names with spaces
-- Extract EVERY field: building specs, tenant info, WALT, clear height, dock doors, % leased, # of tenants, sale date, seller, buyer, cap rate, etc.
-- For Comments/bullets: join with " | "
+- Read visually — may be a scanned image PDF
+- Use human-readable key names
+- Extract ALL fields visible on the page
+- Join bullet point comments with " | "
 - Use null for missing fields
-- Return ONLY a raw JSON array — no markdown, no explanation"""
+- Return ONLY the raw JSON array. No markdown. No ```json. No explanation. Start your response with [ and end with ]"""
 
-USER_PROMPT = """Extract every row of deal data from this CRE comp sheet. Apply all splitting rules. Return a JSON array — one object per deal — with all fields as separate clean keys. Strip parentheses. Return only raw JSON."""
+USER_PROMPT = "Extract all deal rows from this CRE comp sheet as a JSON array. One object per deal. Return only raw JSON starting with [ and ending with ]."
 
 
 def get_client():
     return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def pdf_to_text(pdf_bytes):
-    """Try to extract text from PDF pages."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pages_text = []
-    for i, page in enumerate(doc):
-        text = page.get_text().strip()
-        if text:
-            pages_text.append(f"=== PAGE {i+1} ===\n{text}")
-    return "\n\n".join(pages_text)
-
-
 def parse_json_response(text):
-    clean = text.replace("```json", "").replace("```", "").strip()
-    s, e = clean.find("["), clean.rfind("]")
-    if s != -1 and e != -1:
+    """Robustly parse JSON from Claude response."""
+    # Strip any markdown fences
+    clean = text.strip()
+    clean = clean.replace("```json", "").replace("```", "").strip()
+
+    # Find the first [ and last ]
+    start = clean.find("[")
+    end = clean.rfind("]")
+
+    if start != -1 and end != -1 and end > start:
         try:
-            parsed = json.loads(clean[s:e+1])
-            if isinstance(parsed, list) and len(parsed) > 0:
+            parsed = json.loads(clean[start:end+1])
+            if isinstance(parsed, list):
                 return parsed
-        except json.JSONDecodeError:
-            pass
-    s, e = clean.find("{"), clean.rfind("}")
-    if s != -1 and e != -1:
+        except json.JSONDecodeError as e:
+            raise ValueError(f"JSON parse error: {e}. Raw response (first 500 chars): {clean[:500]}")
+
+    # Try single object fallback
+    start = clean.find("{")
+    end = clean.rfind("}")
+    if start != -1 and end != -1:
         try:
-            obj = json.loads(clean[s:e+1])
+            obj = json.loads(clean[start:end+1])
             if isinstance(obj, dict):
                 return [obj]
         except json.JSONDecodeError:
             pass
-    raise ValueError("Could not parse JSON from Claude response")
+
+    raise ValueError(f"No valid JSON found. Claude returned (first 500 chars): {clean[:500]}")
 
 
 def normalize_row(raw):
     out = {}
     for k, v in raw.items():
-        clean_key = k.strip()
+        key = k.strip()
         if v is None or str(v).strip().lower() in ("null", "n/a", "none", "—", "-", ""):
-            out[clean_key] = ""
+            out[key] = ""
         else:
-            out[clean_key] = str(v).strip()
+            out[key] = str(v).strip()
     return out
 
 
 def extract_comps_from_pdf(pdf_bytes):
-    """Send PDF directly to Claude as base64 — works for both image and text PDFs."""
     client = get_client()
     b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4000,
+        max_tokens=4096,
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",
@@ -173,7 +170,6 @@ def build_excel(all_rows, all_columns):
     return wb
 
 
-# ── SERVE FRONTEND ─────────────────────────────────────────────────────────────
 @app.route('/')
 def serve_index():
     return send_from_directory('../frontend', 'index.html')
@@ -183,7 +179,6 @@ def serve_static(path):
     return send_from_directory('../frontend', path)
 
 
-# ── API ROUTES ──────────────────────────────────────────────────────────────────
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "message": "CompIQ Extractor is running"})
@@ -208,7 +203,6 @@ def extract():
             continue
         try:
             pdf_bytes = file.read()
-            # Send PDF directly to Claude (handles both image and text PDFs)
             rows = extract_comps_from_pdf(pdf_bytes)
             for row in rows:
                 row["__source"] = file.filename
@@ -252,12 +246,8 @@ def export():
         wb.save(tmp.name)
         tmp.close()
         filename = f"CRE_Comps_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-        return send_file(
-            tmp.name,
-            as_attachment=True,
-            download_name=filename,
-            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        return send_file(tmp.name, as_attachment=True, download_name=filename,
+                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
