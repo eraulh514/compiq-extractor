@@ -87,7 +87,7 @@ def extract_comps_from_pdf(pdf_bytes):
 
     message = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4096,
+        max_tokens=8096,
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",
