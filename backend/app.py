@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import fitz  # PyMuPDF
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
@@ -13,25 +14,26 @@ import anthropic
 app = Flask(__name__)
 CORS(app)
 
-SYSTEM_PROMPT = """You are a CRE (commercial real estate) data extraction specialist. You will receive text extracted from a comp sheet PDF — it may be from JLL, CBRE, Cushman & Wakefield, or any custom broker format.
+SYSTEM_PROMPT = """You are a CRE (commercial real estate) data extraction specialist. You will receive a comp sheet PDF — it may be image-based or text-based, from JLL, CBRE, Cushman & Wakefield, or any broker format.
 
 YOUR JOB: Extract every deal/property row and return a JSON array. Each element = one deal.
 
-CRITICAL SPLITTING RULES — apply to every format:
-1. "Property Name" and "Property Address" are often in the same visual column (name on top, address below). Split into SEPARATE fields: "Property Name" and "Property Address".
-2. "Market" and "Submarket" are often in the same column (submarket in parentheses below market). Split into SEPARATE "Market" and "Submarket" fields — strip all parentheses.
-3. "Sale Price" and "Price PSF" are often combined (PSF in parentheses below price). Split into SEPARATE "Sale Price" and "Price PSF" fields — strip all parentheses.
-4. ANY other combined columns — split them the same way.
+CRITICAL SPLITTING RULES:
+1. "Property Name" and "Property Address" are often stacked in the same column. Split into SEPARATE "Property Name" and "Property Address" fields.
+2. "Market" and "Submarket" are often stacked (submarket in parentheses). Split into SEPARATE fields, strip parentheses.
+3. "Sale Price" and "Price PSF" are often stacked (PSF in parentheses). Split into SEPARATE fields, strip parentheses.
+4. Split any other combined columns the same way.
 5. Strip ALL parentheses from all values.
 
-ADDITIONAL RULES:
+RULES:
+- Read the document visually — it may be a scanned image PDF
 - Use clear human-readable key names with spaces
-- Extract EVERY field visible: building specs, tenant info, WALT, clear height, dock doors, % leased, # of tenants, etc.
-- For Comments/bullet points: concatenate all bullet points into one string separated by " | "
-- Use null for fields genuinely not present
-- Return ONLY a raw JSON array — no markdown, no explanation, no preamble"""
+- Extract EVERY field: building specs, tenant info, WALT, clear height, dock doors, % leased, # of tenants, sale date, seller, buyer, cap rate, etc.
+- For Comments/bullets: join with " | "
+- Use null for missing fields
+- Return ONLY a raw JSON array — no markdown, no explanation"""
 
-USER_PROMPT = """Extract every row of deal data from this CRE comp sheet text. Apply all splitting rules (Property Name/Address, Market/Submarket, Sale Price/PSF). Return a JSON array — one object per deal — with all fields as separate clean keys. Strip all parentheses from values. Return only raw JSON."""
+USER_PROMPT = """Extract every row of deal data from this CRE comp sheet. Apply all splitting rules. Return a JSON array — one object per deal — with all fields as separate clean keys. Strip parentheses. Return only raw JSON."""
 
 
 def get_client():
@@ -39,6 +41,7 @@ def get_client():
 
 
 def pdf_to_text(pdf_bytes):
+    """Try to extract text from PDF pages."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages_text = []
     for i, page in enumerate(doc):
@@ -80,14 +83,34 @@ def normalize_row(raw):
     return out
 
 
-def extract_comps_from_text(text):
+def extract_comps_from_pdf(pdf_bytes):
+    """Send PDF directly to Claude as base64 — works for both image and text PDFs."""
     client = get_client()
+    b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=4000,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": USER_PROMPT + "\n\n" + text}]
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": b64
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": USER_PROMPT
+                }
+            ]
+        }]
     )
+
     response_text = "".join(b.text for b in message.content if hasattr(b, "text"))
     rows = parse_json_response(response_text)
     return [normalize_row(r) for r in rows]
@@ -150,7 +173,7 @@ def build_excel(all_rows, all_columns):
     return wb
 
 
-# ── SERVE FRONTEND ────────────────────────────────────────────────────────────
+# ── SERVE FRONTEND ─────────────────────────────────────────────────────────────
 @app.route('/')
 def serve_index():
     return send_from_directory('../frontend', 'index.html')
@@ -160,7 +183,7 @@ def serve_static(path):
     return send_from_directory('../frontend', path)
 
 
-# ── API ROUTES ────────────────────────────────────────────────────────────────
+# ── API ROUTES ──────────────────────────────────────────────────────────────────
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "message": "CompIQ Extractor is running"})
@@ -185,11 +208,8 @@ def extract():
             continue
         try:
             pdf_bytes = file.read()
-            text = pdf_to_text(pdf_bytes)
-            if not text.strip():
-                results.append({"filename": file.filename, "status": "error", "reason": "No text extracted"})
-                continue
-            rows = extract_comps_from_text(text)
+            # Send PDF directly to Claude (handles both image and text PDFs)
+            rows = extract_comps_from_pdf(pdf_bytes)
             for row in rows:
                 row["__source"] = file.filename
                 for key in row.keys():
@@ -197,11 +217,24 @@ def extract():
                         all_columns_ordered.append(key)
                         seen_columns.add(key)
             all_rows.extend(rows)
-            results.append({"filename": file.filename, "status": "success", "rows_extracted": len(rows)})
+            results.append({
+                "filename": file.filename,
+                "status": "success",
+                "rows_extracted": len(rows)
+            })
         except Exception as e:
-            results.append({"filename": file.filename, "status": "error", "reason": str(e)})
+            results.append({
+                "filename": file.filename,
+                "status": "error",
+                "reason": str(e)
+            })
 
-    return jsonify({"results": results, "total_rows": len(all_rows), "columns": all_columns_ordered, "rows": all_rows})
+    return jsonify({
+        "results": results,
+        "total_rows": len(all_rows),
+        "columns": all_columns_ordered,
+        "rows": all_rows
+    })
 
 
 @app.route("/export", methods=["POST"])
@@ -219,8 +252,12 @@ def export():
         wb.save(tmp.name)
         tmp.close()
         filename = f"CRE_Comps_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-        return send_file(tmp.name, as_attachment=True, download_name=filename,
-                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return send_file(
+            tmp.name,
+            as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
