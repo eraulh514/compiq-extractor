@@ -10,38 +10,49 @@ from openpyxl.utils import get_column_letter
 import tempfile
 from datetime import datetime
 import anthropic
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 CORS(app)
 
-SYSTEM_PROMPT = """You are a CRE data extraction specialist. Extract every deal row from this page of a CRE comp sheet and return ONLY a valid JSON array.
+SYSTEM_PROMPT_TEXT = """You are a CRE data extraction specialist. Extract every deal row from this CRE comp sheet text and return ONLY a valid JSON array. Each element = one deal.
+
+SPLITTING RULES:
+- Property Name and Property Address are often on separate lines in the same column — split into "Property Name" and "Property Address"
+- Market and Submarket are often stacked (submarket in parentheses) — split into separate fields, remove parentheses
+- Sale Price and Price PSF are often stacked (PSF in parentheses) — split into separate fields, remove parentheses
+- Remove ALL parentheses from all values
 
 RULES:
-- Read visually — this is a scanned image
-- Split stacked columns: Property Name/Address into separate fields, Market/Submarket into separate fields, Sale Price/PSF into separate fields
-- Remove all parentheses from values
-- Use human-readable key names with spaces
+- Extract EVERY field: seller, buyer, sale date, SF, cap rate, clear height, WALT, dock doors, occupancy, tenancy, comments, etc.
 - Join bullet point comments with " | "
 - Use null for missing fields
-- If no deals visible, return []
 - Return ONLY raw JSON array starting with [ and ending with ]"""
 
-USER_PROMPT = "Extract all deal rows from this page as a JSON array. Return only raw JSON."
+SYSTEM_PROMPT_VISION = """You are a CRE data extraction specialist. Extract every deal row from this scanned page image and return ONLY a valid JSON array. Each element = one deal.
+
+SPLITTING RULES:
+- Property Name and Property Address are often stacked in one column — split into "Property Name" and "Property Address"
+- Market and Submarket are often stacked (submarket in parentheses) — split into separate fields, remove parentheses
+- Sale Price and Price PSF are often stacked (PSF in parentheses) — split into separate fields, remove parentheses
+- Remove ALL parentheses from all values
+
+RULES:
+- Read the image visually
+- Extract EVERY field visible
+- Join bullet point comments with " | "
+- Use null for missing fields
+- If no deals visible return []
+- Return ONLY raw JSON array starting with [ and ending with ]"""
+
+USER_PROMPT = "Extract all deal rows. Return only raw JSON array."
 
 
 def get_client():
     return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def pdf_page_to_base64(page):
-    mat = fitz.Matrix(2, 2)
-    pix = page.get_pixmap(matrix=mat)
-    return base64.standard_b64encode(pix.tobytes("png")).decode("utf-8")
-
-
 def parse_json(text):
-    clean = text.strip().replace("```json", "").replace("```", "").strip()
+    clean = text.strip().replace("```json","").replace("```","").strip()
     s, e = clean.find("["), clean.rfind("]")
     if s != -1 and e != -1 and e > s:
         try:
@@ -70,45 +81,52 @@ def normalize_row(raw):
     return out
 
 
-def extract_single_page(page_num, page_b64):
-    """Extract comps from one page — runs in parallel."""
-    client = get_client()
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": page_b64}},
-                {"type": "text", "text": USER_PROMPT}
-            ]
-        }]
-    )
-    text = "".join(b.text for b in msg.content if hasattr(b, "text"))
-    rows = parse_json(text)
-    return page_num, [normalize_row(r) for r in rows]
-
-
 def extract_comps_from_pdf(pdf_bytes):
-    """Convert each page to image and process in parallel threads."""
+    client = get_client()
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pages = [(i, pdf_page_to_base64(doc[i])) for i in range(doc.page_count)]
 
-    all_rows = []
-    # Process all pages in parallel — each takes ~10s, all finish in ~15s total
-    with ThreadPoolExecutor(max_workers=min(len(pages), 5)) as executor:
-        futures = {executor.submit(extract_single_page, pnum, pb64): pnum for pnum, pb64 in pages}
-        results = {}
-        for future in as_completed(futures):
-            page_num, rows = future.result()
-            results[page_num] = rows
+    # Try full text extraction first (fast, works for text-based PDFs)
+    all_text = []
+    for i, page in enumerate(doc):
+        text = page.get_text().strip()
+        if text:
+            all_text.append(f"=== PAGE {i+1} ===\n{text}")
 
-    # Reassemble in page order
-    for i in range(doc.page_count):
-        all_rows.extend(results.get(i, []))
+    full_text = "\n\n".join(all_text)
 
-    return all_rows
+    # If we got substantial text, send it all to Claude at once (very fast)
+    if len(full_text) > 500:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=8192,
+            system=SYSTEM_PROMPT_TEXT,
+            messages=[{"role":"user","content": USER_PROMPT + "\n\n" + full_text}]
+        )
+        text_resp = "".join(b.text for b in message.content if hasattr(b,"text"))
+        rows = parse_json(text_resp)
+        if rows:
+            return [normalize_row(r) for r in rows]
+
+    # Fallback: vision — send all pages as one multi-image request
+    content = []
+    for i, page in enumerate(doc):
+        mat = fitz.Matrix(2, 2)
+        pix = page.get_pixmap(matrix=mat)
+        b64 = base64.standard_b64encode(pix.tobytes("png")).decode("utf-8")
+        content.append({"type":"text","text":f"=== PAGE {i+1} ==="})
+        content.append({"type":"image","source":{"type":"base64","media_type":"image/png","data":b64}})
+
+    content.append({"type":"text","text": USER_PROMPT})
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=8192,
+        system=SYSTEM_PROMPT_VISION,
+        messages=[{"role":"user","content":content}]
+    )
+    text_resp = "".join(b.text for b in message.content if hasattr(b,"text"))
+    rows = parse_json(text_resp)
+    return [normalize_row(r) for r in rows]
 
 
 def build_excel(all_rows, all_columns):
@@ -136,12 +154,12 @@ def build_excel(all_rows, all_columns):
         ws.cell(row=ri, column=1).fill = fill
         ws.cell(row=ri, column=1).border = bdr
         ws.cell(row=ri, column=1).alignment = ca
-        ws.cell(row=ri, column=2, value=row.get("__source", "")).font = cf
+        ws.cell(row=ri, column=2, value=row.get("__source","")).font = cf
         ws.cell(row=ri, column=2).fill = fill
         ws.cell(row=ri, column=2).border = bdr
         ws.cell(row=ri, column=2).alignment = ca
         for ci, col in enumerate(all_columns, 3):
-            val = row.get(col, "")
+            val = row.get(col,"")
             c = ws.cell(row=ri, column=ci, value=val)
             c.font = cf; c.fill = fill; c.border = bdr
             c.alignment = caw if "comment" in col.lower() else ca
@@ -166,18 +184,18 @@ def serve_static(path):
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "message": "CompIQ Extractor is running"})
+    return jsonify({"status":"ok","message":"CompIQ Extractor is running"})
 
 
 @app.route("/extract", methods=["POST"])
 def extract():
     if "files[]" not in request.files:
-        return jsonify({"error": "No files uploaded"}), 400
+        return jsonify({"error":"No files uploaded"}), 400
     files = request.files.getlist("files[]")
     all_rows, all_columns_ordered, seen_columns, results = [], [], set(), []
     for file in files:
         if not file.filename.lower().endswith(".pdf"):
-            results.append({"filename": file.filename, "status": "skipped", "reason": "Not a PDF"})
+            results.append({"filename":file.filename,"status":"skipped","reason":"Not a PDF"})
             continue
         try:
             rows = extract_comps_from_pdf(file.read())
@@ -188,27 +206,27 @@ def extract():
                         all_columns_ordered.append(key)
                         seen_columns.add(key)
             all_rows.extend(rows)
-            results.append({"filename": file.filename, "status": "success", "rows_extracted": len(rows)})
+            results.append({"filename":file.filename,"status":"success","rows_extracted":len(rows)})
         except Exception as e:
-            results.append({"filename": file.filename, "status": "error", "reason": str(e)})
-    return jsonify({"results": results, "total_rows": len(all_rows), "columns": all_columns_ordered, "rows": all_rows})
+            results.append({"filename":file.filename,"status":"error","reason":str(e)})
+    return jsonify({"results":results,"total_rows":len(all_rows),"columns":all_columns_ordered,"rows":all_rows})
 
 
 @app.route("/export", methods=["POST"])
 def export():
     data = request.get_json()
     if not data or not data.get("rows"):
-        return jsonify({"error": "No data provided"}), 400
+        return jsonify({"error":"No data"}), 400
     try:
-        wb = build_excel(data["rows"], data.get("columns", []))
+        wb = build_excel(data["rows"], data.get("columns",[]))
         tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
         wb.save(tmp.name); tmp.close()
         return send_file(tmp.name, as_attachment=True,
                          download_name=f"CRE_Comps_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
                          mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error":str(e)}), 500
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)
