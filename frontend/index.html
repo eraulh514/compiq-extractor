@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outrigger Industrial — CRE Comp Sheet Extractor</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#0a1628;
+  --navy-mid:#0d1f3c;
+  --navy-light:#122347;
+  --cyan:#00b4d8;
+  --cyan-bright:#22d3ee;
+  --cyan-dim:rgba(0,180,216,0.12);
+  --cyan-border:rgba(0,180,216,0.25);
+  --white:#ffffff;
+  --off-white:#e8f4f8;
+  --muted:#7aa7bf;
+  --muted-dim:rgba(122,167,191,0.5);
+  --border:rgba(0,180,216,0.1);
+  --border-hard:rgba(0,180,216,0.22);
+  --shadow-lg:0 8px 48px rgba(0,0,0,0.5);
+  --shadow-glow:0 0 40px rgba(0,180,216,0.12);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'DM Sans',sans-serif;background:var(--navy);color:var(--white);line-height:1.6;overflow-x:hidden}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:0 3rem;height:64px;background:rgba(10,22,40,0.94);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+.logo-mark{width:30px;height:30px;border-radius:50%;background:var(--cyan);position:relative;overflow:hidden;flex-shrink:0}
+.logo-mark::before{content:'';position:absolute;inset:0;background:linear-gradient(transparent 22%,rgba(10,22,40,.55) 22%,rgba(10,22,40,.55) 34%,transparent 34%,transparent 47%,rgba(10,22,40,.55) 47%,rgba(10,22,40,.55) 59%,transparent 59%,transparent 72%,rgba(10,22,40,.55) 72%,rgba(10,22,40,.55) 84%,transparent 84%)}
+.logo-text{display:flex;flex-direction:column;line-height:1.1}
+.logo-name{font-size:1rem;font-weight:600;color:var(--white)}
+.logo-sub{font-size:.58rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+.nav-links{display:flex;gap:2rem;align-items:center}
+.nav-links a{font-size:.875rem;font-weight:500;color:var(--muted);text-decoration:none;transition:color .2s}
+.nav-links a:hover{color:var(--white)}
+.nav-cta{background:var(--cyan)!important;color:var(--navy)!important;padding:.45rem 1.2rem;border-radius:6px;font-weight:600!important}
+.nav-cta:hover{background:var(--cyan-bright)!important}
+
+/* HERO */
+.hero{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;padding-top:64px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 50% 60% at 90% 40%,rgba(0,180,216,0.07) 0%,transparent 60%),radial-gradient(ellipse 30% 40% at 5% 80%,rgba(0,180,216,0.04) 0%,transparent 50%);pointer-events:none}
+.hero::after{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(0,180,216,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,180,216,0.025) 1px,transparent 1px);background-size:64px 64px;pointer-events:none}
+.hero-left{display:flex;flex-direction:column;justify-content:center;padding:5rem 4rem 5rem 5rem;position:relative;z-index:1}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font-size:.7rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan);margin-bottom:1.5rem}
+.eyebrow-line{width:24px;height:1px;background:var(--cyan)}
+h1{font-family:'DM Serif Display',serif;font-size:clamp(2.5rem,4vw,3.8rem);line-height:1.08;letter-spacing:-.03em;color:var(--white);margin-bottom:1.5rem}
+h1 em{font-style:italic;color:var(--cyan)}
+.hero-sub{font-size:1.05rem;line-height:1.75;color:var(--muted);max-width:440px;margin-bottom:2.5rem}
+.hero-actions{display:flex;gap:1rem;align-items:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:.8rem 1.75rem;border-radius:8px;font-size:.9rem;font-weight:500;text-decoration:none;cursor:pointer;border:none;font-family:'DM Sans',sans-serif;transition:all .2s}
+.btn-primary{background:var(--cyan);color:var(--navy);font-weight:600;box-shadow:0 0 24px rgba(0,180,216,0.3)}
+.btn-primary:hover{background:var(--cyan-bright);transform:translateY(-1px);box-shadow:0 0 36px rgba(0,180,216,0.5)}
+.btn-outline{background:transparent;color:var(--muted);border:1px solid var(--border-hard);padding:.8rem 1.5rem}
+.btn-outline:hover{color:var(--white);border-color:var(--cyan);background:rgba(0,180,216,0.06)}
+
+.hero-right{display:flex;align-items:center;justify-content:center;padding:5rem 4rem 5rem 2rem;position:relative;z-index:1}
+.float-card{width:100%;max-width:480px;background:var(--navy-mid);border-radius:16px;border:1px solid var(--border-hard);box-shadow:var(--shadow-lg),var(--shadow-glow);overflow:hidden;animation:float 5s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.fc-bar{background:rgba(0,180,216,0.06);border-bottom:1px solid var(--border);padding:.8rem 1.25rem;display:flex;align-items:center;gap:10px}
+.fc-dots{display:flex;gap:6px}
+.fc-dots span{width:10px;height:10px;border-radius:50%}
+.fc-dots span:nth-child(1){background:#ff5f57}
+.fc-dots span:nth-child(2){background:#febc2e}
+.fc-dots span:nth-child(3){background:#28c840}
+.fc-title{flex:1;text-align:center;font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted-dim)}
+.fc-body{padding:1.25rem}
+.fc-file{border:1.5px dashed var(--cyan-border);border-radius:8px;padding:1.1rem;text-align:center;background:var(--cyan-dim);margin-bottom:1rem}
+.fc-file-icon{font-size:1.3rem;opacity:.55;margin-bottom:4px}
+.fc-file-name{font-size:.75rem;font-weight:600;color:var(--cyan);margin-bottom:2px}
+.fc-file-meta{font-size:.7rem;color:var(--muted)}
+.fc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:1rem}
+.fc-field{background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:5px;padding:6px 9px}
+.fc-lbl{font-size:8px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:2px}
+.fc-val{font-size:11px;font-weight:600;font-family:'DM Mono',monospace;color:var(--off-white)}
+.fc-val.accent{color:var(--cyan)}
+.fc-val.warm{color:#f59e0b}
+.fc-btn{width:100%;background:var(--cyan);color:var(--navy);border:none;border-radius:6px;padding:9px;font-size:.75rem;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:'DM Sans',sans-serif;text-align:center}
+
+/* SECTIONS */
+.section{padding:7rem 5rem;position:relative}
+.section-alt{padding:7rem 5rem;background:var(--navy-mid)}
+.s-label{font-size:.7rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan);margin-bottom:1rem}
+h2{font-family:'DM Serif Display',serif;font-size:clamp(2rem,3vw,2.75rem);line-height:1.12;letter-spacing:-.02em;color:var(--white);margin-bottom:1rem}
+.s-sub{font-size:1rem;color:var(--muted);max-width:520px;line-height:1.75;margin-bottom:3.5rem}
+
+/* STEPS */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem}
+.step{background:var(--navy);border:1px solid var(--border);border-radius:14px;padding:2rem;transition:transform .2s,border-color .2s,box-shadow .2s}
+.step:hover{transform:translateY(-6px);border-color:var(--cyan-border);box-shadow:var(--shadow-glow)}
+.step-num{font-family:'DM Mono',monospace;font-size:.7rem;font-weight:500;color:var(--cyan);letter-spacing:.1em;margin-bottom:1.1rem;display:flex;align-items:center;gap:8px}
+.step-num::after{content:'';flex:1;height:1px;background:var(--border-hard)}
+.step h3{font-size:.9375rem;font-weight:600;color:var(--white);margin-bottom:.5rem}
+.step p{font-size:.85rem;color:var(--muted);line-height:1.65}
+
+/* TOOL */
+.tool-section{padding:7rem 5rem}
+.demo-shell{background:var(--navy-mid);border-radius:16px;border:1px solid var(--border-hard);box-shadow:var(--shadow-lg);overflow:hidden}
+.shell-bar{background:rgba(0,180,216,0.05);border-bottom:1px solid var(--border);padding:.75rem 1.5rem;display:flex;align-items:center;gap:12px}
+.shell-dots{display:flex;gap:6px}
+.shell-dots span{width:10px;height:10px;border-radius:50%}
+.shell-dots span:nth-child(1){background:#ff5f57}
+.shell-dots span:nth-child(2){background:#febc2e}
+.shell-dots span:nth-child(3){background:#28c840}
+.shell-title{flex:1;text-align:center;font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted-dim)}
+.shell-body{padding:2rem}
+
+.upload-zone{border:2px dashed var(--cyan-border);border-radius:12px;padding:2.5rem;text-align:center;cursor:pointer;transition:all .2s;position:relative;margin-bottom:1.5rem;background:var(--cyan-dim)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--cyan);background:rgba(0,180,216,0.1)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-icon{font-size:2rem;opacity:.4;margin-bottom:.6rem}
+.upload-title{font-size:.9375rem;font-weight:500;color:var(--white);margin-bottom:.3rem}
+.upload-sub{font-size:.8125rem;color:var(--muted);line-height:1.5}
+
+.progress-wrap{display:none;margin-bottom:1.25rem}
+.progress-label{font-size:.8rem;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.spinner{width:13px;height:13px;border:2px solid var(--border-hard);border-top-color:var(--cyan);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.progress-bar-track{height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden}
+.progress-bar-fill{height:100%;background:var(--cyan);border-radius:99px;transition:width .3s;box-shadow:0 0 8px var(--cyan)}
+
+.file-list{margin-bottom:1rem}
+.file-item{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.8125rem}
+.file-item:last-child{border-bottom:none}
+.f-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.f-wait{background:var(--muted-dim)}.f-proc{background:#f59e0b}.f-done{background:#22c55e}.f-err{background:#ef4444}
+.f-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--off-white)}
+.f-status{font-size:.75rem;color:var(--muted);flex-shrink:0}
+
+.notice{display:flex;gap:8px;align-items:flex-start;background:rgba(0,180,216,0.07);border:1px solid var(--cyan-border);border-radius:8px;padding:.7rem 1rem;font-size:.8rem;color:var(--muted);margin-bottom:1rem}
+.notice strong{color:var(--cyan)}
+.notice.err{background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.25)}
+.notice.err strong{color:#f87171}
+
+.tbl-shell{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.tbl-wrap{overflow-x:auto;max-height:480px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:.775rem}
+thead th{background:rgba(0,180,216,0.07);padding:9px 13px;text-align:left;font-size:.68rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1}
+tbody tr{border-bottom:1px solid rgba(255,255,255,0.04);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:rgba(0,180,216,0.05)}
+tbody td{padding:8px 13px;vertical-align:top;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;color:var(--off-white)}
+.td-num{color:var(--muted);font-size:.72rem;font-family:'DM Mono',monospace;text-align:center}
+.td-src{font-size:.72rem;color:var(--muted)}
+.td-bold{font-weight:600;color:var(--white)}
+.td-accent{font-family:'DM Mono',monospace;color:var(--cyan);font-weight:500}
+.td-warm{font-family:'DM Mono',monospace;color:#f59e0b}
+.td-mono{font-family:'DM Mono',monospace}
+
+.export-btns{display:flex;gap:.75rem;margin-top:1.5rem;flex-wrap:wrap;align-items:center}
+.btn-export{background:var(--cyan);color:var(--navy);font-weight:600;box-shadow:0 0 20px rgba(0,180,216,0.25)}
+.btn-export:hover{background:var(--cyan-bright);box-shadow:0 0 32px rgba(0,180,216,0.45)}
+.btn-sec{background:transparent;color:var(--muted);border:1px solid var(--border-hard)}
+.btn-sec:hover{color:var(--white);border-color:var(--cyan)}
+
+footer{background:rgba(6,14,27,0.98);border-top:1px solid var(--border);padding:2rem 5rem;display:flex;align-items:center;justify-content:space-between}
+.foot-brand{display:flex;align-items:center;gap:10px}
+.foot-logo-name{font-weight:600;color:var(--white);font-size:.95rem}
+.foot-logo-sub{font-size:.58rem;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+.foot-copy{font-size:.78rem;color:var(--muted-dim)}
+
+.fu{opacity:0;transform:translateY(22px);transition:opacity .6s ease,transform .6s ease}
+.fu.on{opacity:1;transform:none}
+
+@media(max-width:960px){
+  .hero{grid-template-columns:1fr}.hero-right{display:none}.hero-left{padding:4rem 2rem}
+  nav{padding:0 1.5rem}.nav-links{display:none}
+  .section,.section-alt,.tool-section{padding:5rem 1.5rem}
+  .steps{grid-template-columns:1fr}
+  footer{flex-direction:column;gap:1rem;text-align:center;padding:1.5rem}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="logo-mark"></div>
+    <div class="logo-text">
+      <span class="logo-name">Outrigger</span>
+      <span class="logo-sub">Industrial</span>
+    </div>
+  </a>
+  <div class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#tool">Extract</a>
+    <a href="#tool" class="nav-cta">Extract now</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-left">
+    <div class="eyebrow"><span class="eyebrow-line"></span>AI-Powered CRE Intelligence</div>
+    <h1>Turn comp sheets into <em>clean data</em>, instantly</h1>
+    <p class="hero-sub">Upload any industrial sale comp sheet — JLL, CBRE, Cushman & Wakefield, or custom broker formats — and get a structured Excel file back in seconds. No manual entry. No missed columns.</p>
+    <div class="hero-actions">
+      <a href="#tool" class="btn btn-primary">
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1v9M3 6l4.5 4.5L12 6M1.5 12.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Extract now
+      </a>
+      <a href="#how" class="btn btn-outline">How it works →</a>
+    </div>
+  </div>
+  <div class="hero-right">
+    <div class="float-card">
+      <div class="fc-bar">
+        <div class="fc-dots"><span></span><span></span><span></span></div>
+        <div class="fc-title">outrigger — comp extractor</div>
+      </div>
+      <div class="fc-body">
+        <div class="fc-file">
+          <div class="fc-file-icon">📄</div>
+          <div class="fc-file-name">Atlanta_Sales_Comps.pdf</div>
+          <div class="fc-file-meta">Image-based PDF · 3 pages · 30 comps</div>
+        </div>
+        <div class="fc-grid">
+          <div class="fc-field"><div class="fc-lbl">Property Name</div><div class="fc-val">Riverside Business Ctr</div></div>
+          <div class="fc-field"><div class="fc-lbl">Sale Price</div><div class="fc-val accent">$96,100,000</div></div>
+          <div class="fc-field"><div class="fc-lbl">Cap Rate</div><div class="fc-val warm">4.44%</div></div>
+          <div class="fc-field"><div class="fc-lbl">Seller</div><div class="fc-val">FHR Capital</div></div>
+          <div class="fc-field"><div class="fc-lbl">Buyer</div><div class="fc-val">BGO</div></div>
+          <div class="fc-field"><div class="fc-lbl">Total SF</div><div class="fc-val">653,484</div></div>
+        </div>
+        <div class="fc-btn">↓ EXPORTING TO EXCEL...</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section-alt" id="how">
+  <div class="s-label">Process</div>
+  <h2>Three steps to structured data</h2>
+  <p class="s-sub">Our AI reads comp sheets the way a human would — understanding layout, splitting combined columns, and capturing every field — regardless of broker or format.</p>
+  <div class="steps fu">
+    <div class="step">
+      <div class="step-num">01</div>
+      <h3>Upload your PDFs</h3>
+      <p>Drop one comp sheet or a whole batch. JLL, CBRE, Cushman & Wakefield, custom broker sheets — any format, any layout, image-based or text.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <h3>AI reads every field</h3>
+      <p>Claude AI scans each page and extracts all deal data — automatically splitting combined columns like Property Name/Address, Market/Submarket, and Sale Price/PSF.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <h3>Download clean Excel</h3>
+      <p>Every comp becomes a row. Columns are discovered dynamically from the document. One click exports a formatted, ready-to-use spreadsheet.</p>
+    </div>
+  </div>
+</section>
+
+<!-- TOOL -->
+<section class="tool-section" id="tool">
+  <div class="s-label">Extract</div>
+  <h2>Upload your comp sheets</h2>
+  <p class="s-sub">Drop any CRE comp sheet PDF — image-based or text — and get a clean Excel file back in seconds.</p>
+
+  <div class="demo-shell fu">
+    <div class="shell-bar">
+      <div class="shell-dots"><span></span><span></span><span></span></div>
+      <div class="shell-title" id="shell-title">Outrigger Extractor — ready</div>
+    </div>
+    <div class="shell-body">
+      <div class="upload-zone" id="upload-zone">
+        <input type="file" id="file-input" accept="application/pdf" multiple />
+        <div class="upload-icon">📂</div>
+        <div class="upload-title">Drop comp sheet PDFs here or click to browse</div>
+        <div class="upload-sub">JLL · CBRE · Cushman & Wakefield · Any broker format<br>Image-based &amp; text PDFs · Multiple files supported</div>
+      </div>
+
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-label"><span class="spinner"></span><span id="progress-text">Extracting...</span></div>
+        <div class="progress-bar-track"><div class="progress-bar-fill" id="progress-bar" style="width:0%"></div></div>
+      </div>
+
+      <div class="file-list" id="file-list"></div>
+      <div id="notice-area"></div>
+
+      <div id="results-area" style="display:none">
+        <div class="tbl-shell">
+          <div class="tbl-wrap">
+            <table><thead id="tbl-head"></thead><tbody id="tbl-body"></tbody></table>
+          </div>
+        </div>
+        <div class="export-btns">
+          <button class="btn btn-export" onclick="downloadExcel()">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v7.5M3 6l3.5 3.5L10 6M1 11.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Download Excel
+          </button>
+          <button class="btn btn-sec" onclick="addMore()">Add more PDFs</button>
+          <button class="btn btn-sec" onclick="clearAll()">Clear all</button>
+          <span id="export-meta" style="font-size:.8rem;color:var(--muted)"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="foot-brand">
+    <div class="logo-mark" style="width:26px;height:26px"></div>
+    <div>
+      <div class="foot-logo-name">Outrigger</div>
+      <div class="foot-logo-sub">Industrial</div>
+    </div>
+  </div>
+  <div class="foot-copy">AI-powered CRE data extraction · Powered by Claude</div>
+</footer>
+
+<script>
+const API_BASE = window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1'
+  ? 'http://localhost:5000' : '';
+
+var allRows=[],allColumns=[],fileQueue=[];
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function setShellTitle(t){document.getElementById('shell-title').textContent=t;}
+function setNotice(msg,type){
+  var area=document.getElementById('notice-area');
+  if(!msg){area.innerHTML='';return;}
+  area.innerHTML='<div class="notice'+(type==='error'?' err':'')+'"><span>✦</span><span>'+msg+'</span></div>';
+}
+function updateFileList(){
+  var el=document.getElementById('file-list');
+  if(!fileQueue.length){el.innerHTML='';return;}
+  el.innerHTML=fileQueue.map(function(f){
+    var dc={wait:'f-wait',proc:'f-proc',done:'f-done',err:'f-err'}[f.status]||'f-wait';
+    var sl={wait:'Queued',proc:'Extracting…',done:(f.count||0)+' rows',err:'Failed: '+f.err}[f.status]||'';
+    return '<div class="file-item"><div class="f-dot '+dc+'"></div><span class="f-name">'+esc(f.name)+'</span><span class="f-status">'+esc(sl)+'</span></div>';
+  }).join('');
+}
+function renderTable(){
+  var head=document.getElementById('tbl-head'),body=document.getElementById('tbl-body');
+  head.innerHTML='<tr><th>#</th><th>Source</th>'+allColumns.map(function(c){return '<th>'+esc(c)+'</th>';}).join('')+'</tr>';
+  body.innerHTML='';
+  allRows.forEach(function(row,i){
+    var tr=document.createElement('tr');
+    var cells='<td class="td-num">'+(i+1)+'</td><td class="td-src">'+esc(row.__source||'')+'</td>';
+    allColumns.forEach(function(col){
+      var v=row[col]||'',cls='',lc=col.toLowerCase();
+      if(lc.includes('price')&&!lc.includes('psf'))cls='td-accent';
+      else if(lc.includes('cap rate'))cls='td-warm';
+      else if(lc.includes('property name')||lc==='property')cls='td-bold';
+      else if(lc.includes('psf'))cls='td-mono';
+      cells+='<td'+(cls?' class="'+cls+'"':'')+' title="'+esc(v)+'">'+esc(v.length>40?v.slice(0,37)+'…':v)+'</td>';
+    });
+    tr.innerHTML=cells;body.appendChild(tr);
+  });
+  document.getElementById('export-meta').textContent=allRows.length+' comps · '+allColumns.length+' columns';
+  document.getElementById('results-area').style.display='block';
+}
+async function processFiles(files){
+  var pdfs=Array.from(files).filter(function(f){return f.name.toLowerCase().endsWith('.pdf');});
+  if(!pdfs.length){setNotice('Please upload PDF files.','error');return;}
+  var newItems=pdfs.map(function(f){return{name:f.name,file:f,status:'wait',count:0,err:''};});
+  fileQueue=fileQueue.concat(newItems);updateFileList();setNotice('');
+  document.getElementById('progress-wrap').style.display='block';
+  var done=0;
+  for(var i=0;i<newItems.length;i++){
+    var item=newItems[i];item.status='proc';updateFileList();
+    setShellTitle('Extracting '+item.name+'…');
+    document.getElementById('progress-text').textContent='Extracting '+item.name+' ('+(i+1)+' of '+newItems.length+')';
+    document.getElementById('progress-bar').style.width=Math.round((i/newItems.length)*100)+'%';
+    try{
+      var fd=new FormData();fd.append('files[]',item.file);
+      var resp=await fetch(API_BASE+'/extract',{method:'POST',body:fd});
+      if(!resp.ok){var err=await resp.json().catch(function(){return{error:'Server error '+resp.status};});throw new Error(err.error||'Server error '+resp.status);}
+      var data=await resp.json();
+      var fr=data.results&&data.results[0];
+      if(fr&&fr.status==='error')throw new Error(fr.reason||'Extraction failed');
+      var rows=data.rows||[],cols=data.columns||[];
+      var ec=new Set(allColumns);
+      cols.forEach(function(c){if(!ec.has(c)&&c!=='__source'){allColumns.push(c);ec.add(c);}});
+      allRows=allRows.concat(rows);item.status='done';item.count=rows.length;done++;
+    }catch(e){item.status='err';item.err=e.message||'Unknown error';}
+    updateFileList();if(allRows.length>0)renderTable();
+  }
+  document.getElementById('progress-bar').style.width='100%';
+  setTimeout(function(){document.getElementById('progress-wrap').style.display='none';},800);
+  setShellTitle(allRows.length+' comps extracted from '+fileQueue.length+' file(s)');
+  var errors=newItems.filter(function(f){return f.status==='err';});
+  if(errors.length)setNotice('<strong>'+errors.length+' file(s) failed.</strong> '+errors.map(function(f){return f.name+': '+f.err;}).join(' | '),'error');
+  else setNotice('<strong>'+allRows.length+' comps</strong> extracted across '+done+' file(s) · '+allColumns.length+' columns discovered');
+}
+async function downloadExcel(){
+  if(!allRows.length){setNotice('Nothing to export yet.','error');return;}
+  try{
+    var resp=await fetch(API_BASE+'/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:allRows,columns:allColumns})});
+    if(!resp.ok)throw new Error('Export failed: '+resp.status);
+    var blob=await resp.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='CRE_Comps_'+new Date().toISOString().slice(0,10)+'.xlsx';a.click();URL.revokeObjectURL(url);
+  }catch(e){setNotice('Export failed: '+e.message,'error');}
+}
+function addMore(){document.getElementById('file-input').click();}
+function clearAll(){
+  allRows=[];allColumns=[];fileQueue=[];
+  document.getElementById('file-list').innerHTML='';
+  document.getElementById('results-area').style.display='none';
+  document.getElementById('file-input').value='';
+  document.getElementById('progress-wrap').style.display='none';
+  setNotice('');setShellTitle('Outrigger Extractor — ready');
+}
+var zone=document.getElementById('upload-zone');
+zone.addEventListener('dragover',function(e){e.preventDefault();zone.classList.add('drag');});
+zone.addEventListener('dragleave',function(){zone.classList.remove('drag');});
+zone.addEventListener('drop',function(e){e.preventDefault();zone.classList.remove('drag');processFiles(e.dataTransfer.files);});
+document.getElementById('file-input').addEventListener('change',function(e){if(e.target.files.length)processFiles(e.target.files);});
+var obs=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting)e.target.classList.add('on');});},{threshold:0.08});
+document.querySelectorAll('.fu').forEach(function(el){obs.observe(el);});
+</script>
+</body>
+</html>

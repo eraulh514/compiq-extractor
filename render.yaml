@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: compiq-extractor
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    healthCheckPath: /health
